@@ -107,6 +107,34 @@ body{font-family:var(--f-cn);color:var(--ink)}
 .closebar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 16px 16px;border-top:2px solid var(--ink);font-size:13px;color:#6b5f4c}
 #toast{position:fixed;z-index:40;left:50%;top:calc(14px + env(safe-area-inset-top,0px));transform:translateX(-50%);background:var(--paper);color:var(--ink);box-shadow:inset 0 0 0 2px var(--ink),0 3px 0 rgba(0,0,0,.5);padding:8px 14px;font:13px var(--f-pix);max-width:calc(100% - 32px);text-align:center}
 @media (max-width:640px){.items{grid-template-columns:minmax(0,1fr)}.gz-title{font-size:26px}}
+.reader-mobile{height:100%;width:100%;overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;padding:16px 16px calc(80px + env(safe-area-inset-bottom,0px));box-sizing:border-box;color:var(--ink);font-size:16px;line-height:1.65}
+.reader-page{box-sizing:border-box;width:100%;padding:16px;background:var(--paper);border:2px solid var(--ink);overflow-wrap:anywhere}
+.reader-page h1,.reader-page h2{font-weight:400;line-height:1.4;margin:16px 0;font-size:26px}
+.reader-page h2{border-top:2px solid var(--ink);padding-top:12px}
+.reader-page p{margin:12px 0}
+.reader-page canvas{image-rendering:pixelated}
+.reader-close{justify-content:flex-end}
+.reader-mobile button{box-sizing:border-box;min-height:40px;font-size:16px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}
+.reader-mobile .facts{font-size:16px;gap:8px 10px}
+.reader-mobile .facts dt,.reader-mobile .hint{font-size:14px}
+.reader-mobile .note-b{font-size:16px;background:#f6efdc}
+.reader-mobile .row{margin:12px 0}
+.reader-mobile input{box-sizing:border-box;width:100%;min-height:40px;font-size:16px}
+.reader-mobile button:disabled{cursor:default}
+.reader-nav{position:fixed;bottom:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 16px calc(8px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--paper);font:14px var(--f-pix)}
+.reader-nav .chip{font-size:14px}
+@media (max-width:599px) and (orientation:portrait){
+  .ov{padding:16px;align-items:flex-start}
+  .sheet{max-height:calc(100dvh - 32px);overflow-y:auto}
+  .chat{min-height:0}
+  .chat .log{flex:1 1 auto;min-height:120px}
+  .chat .tabs button,.pbtn,.chip{box-sizing:border-box;min-height:40px;font-size:14px}
+  .cnote,.closebar,.score,.mood-picker p,.diary-page summary,.hint{font-size:14px}
+  .back-headline{white-space:normal;overflow:visible}
+  .compose{flex-wrap:wrap}
+  .compose textarea{font-size:16px}
+  .chat .closebar{flex-shrink:0}
+}
 </style>
 </head><body>
 
@@ -589,7 +617,8 @@ function wrapBal(s,w,size){ let best=wrap(s,w,size); if(best.length<2) return be
 function hash(a,b,c=0){ let x=Math.imul(a+101,73856093)^Math.imul(b+37,19349663)^Math.imul(c+11,83492791); x^=x>>>13; x=Math.imul(x,1274126177); return ((x^x>>>16)>>>0)/4294967296; }
 
 // ---------- overlay shell
-let root, cv, k, input, st=null, hits=[], hover=null;
+let root, cv, k, input, mobile, st=null, hits=[], hover=null;
+const singlePage=()=>innerWidth<600&&matchMedia('(orientation: portrait)').matches;
 function ensure(){ if(root) return;
   root=document.createElement("div"); root.id="reader"; root.hidden=true;
   root.style.cssText="position:fixed;inset:0;z-index:30;background:rgba(8,6,5,.8);display:flex;align-items:center;justify-content:center";
@@ -599,6 +628,10 @@ function ensure(){ if(root) return;
   input.style.cssText="position:absolute;display:none;border:0;outline:0;background:transparent;color:"+INK+";font-family:HYPixel,monospace;padding:0;margin:0";
   input.addEventListener("input",()=>render());
   const wrapEl=document.createElement("div"); wrapEl.style.cssText="position:relative"; wrapEl.append(cv,input); root.append(wrapEl); document.body.append(root);
+  mobile=document.createElement('div'); mobile.className='reader-mobile'; mobile.hidden=true; root.append(mobile);
+  let touch;
+  mobile.addEventListener('touchstart',e=>{touch=null;if(e.target.closest('input,textarea'))return;const t=e.touches[0];touch=[t.clientX,t.clientY];},{passive:true});
+  mobile.addEventListener('touchend',e=>{if(!touch||!st||st.mode!=='paper')return;const t=e.changedTouches[0],dx=t.clientX-touch[0],dy=t.clientY-touch[1];touch=null;if(Math.abs(dx)>=60&&Math.abs(dx)>Math.abs(dy)*1.5)turnPage(dx<0?1:-1);},{passive:true});
   cv.addEventListener("mousemove",e=>{ const [x,y]=pos(e); const h=hits.find(q=>x>=q.x&&x<q.x+q.w&&y>=q.y&&y<q.y+q.h)||null; if(h!==hover&&(!h||!hover||h.id!==hover.id)){ hover=h; render(); } cv.style.cursor=h?"pointer":"default"; });
   cv.addEventListener("mouseleave",()=>{ hover=null; render(); });
   cv.addEventListener("click",e=>{ const [x,y]=pos(e); const h=hits.find(q=>x>=q.x&&x<q.x+q.w&&y>=q.y&&y<q.y+q.h); if(h){ h.act(); render(); } });
@@ -606,8 +639,11 @@ function ensure(){ if(root) return;
   addEventListener("keydown",e=>{ if(root.hidden||!st) return; if(e.key==="Escape") close(); });
   addEventListener("resize",fit); }
 function pos(e){ const r=cv.getBoundingClientRect(); return [(e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H]; }
-// TODO(design): 375 宽时现有 960 双页整幅缩放，正文和回执按钮很小；移动端阅读方式待 Gawain 定稿。
-function fit(){ if(!cv) return; const s=Math.min(innerWidth/W,innerHeight/H)*.98; cv.style.width=Math.round(W*s)+"px"; cv.style.height=Math.round(H*s)+"px"; placeInput(); }
+function fit(){ if(!cv) return;
+  if(st){const next=singlePage();if(st.mobile&&!next){saveScroll();st.spread=Math.floor((st.page||0)/2);}else if(!st.mobile&&next&&Math.floor((st.page||0)/2)!==st.spread)st.page=st.spread*2;
+    st.mobile=next;root.classList.toggle('single-page',next);cv.parentElement.hidden=next;mobile.hidden=!next;
+    if(next){input.style.display='none';st.flip=null;render();return;}}
+  const s=Math.min(innerWidth/W,innerHeight/H)*.98; cv.style.width=Math.round(W*s)+"px"; cv.style.height=Math.round(H*s)+"px"; placeInput();if(st)render(); }
 function close(){ if(!st) return; const cb=st.onClose; root.hidden=true; input.style.display="none"; st=null; cb&&cb(); }
 
 // ---------- newsprint page with a deckled, uneven edge (only the margins are touched; the text area stays clean)
@@ -709,7 +745,7 @@ function backPage(pk,ox,oy,pw,ph,continuation=0){ const s=st, x=32, iw=pw-64; le
   if(!notes.length){ for(const l of wrap(window.__STATIC_SITE?"想跟老板说的话，写在回执里发给 Arthur。":"在柜台问老板，他当场答不上来的问题会记在这里，下一期回答。",iw)){ TB(pk,l,x,cy,MUTE); cy+=LH; } }
   else for(const q of notes){ const lines=wrap(q.q,iw-80); lines.forEach((l,i)=>TB(pk,l,x,cy+i*LH)); TB(pk,"明天答复",x+iw,cy,TEAL,{align:"right"}); cy+=lines.length*LH+4; }
   }
-  cy+=10; rule(pk,x,cy,iw); cy+=14; TB(pk,"明日预告",x,cy,RED); cy+=LH+4; for(const l of wrap("老板说要去找一家能看日落的屋顶咖啡。如果找到了，别告诉 Merlin。",iw)){ TB(pk,l,x,cy); cy+=LH; }
+  cy+=10; rule(pk,x,cy,iw); cy+=14; TB(pk,window.__STATIC_SITE?"店主的话":"明日预告",x,cy,RED); cy+=LH+4; for(const l of wrap(window.__STATIC_SITE?"上海只给朋友出这一期。":"老板说要去找一家能看日落的屋顶咖啡。如果找到了，别告诉 Merlin。",iw)){ TB(pk,l,x,cy); cy+=LH; }
   cy+=12; TB(pk,`你的太阳币：${s.coins}`,x,cy,BRASS_D); }
 
 let SPREADS=[];
@@ -721,7 +757,7 @@ function renderPage(which,side){ const pw=st.pw, ph=st.ph, c=mk(pw,ph), pk=c.get
   // keep only the paper: re-apply the deckled outline so text never sits on a torn margin
   pk.globalCompositeOperation="destination-in"; pk.drawImage(pageBase(pw,ph,side,n),0,0); pk.globalCompositeOperation="source-over"; return c; }
 function shadowOf(c){ const s=mk(c.width,c.height), sk=s.getContext("2d"); sk.drawImage(c,0,0); sk.globalCompositeOperation="source-in"; sk.fillStyle="rgba(0,0,0,.5)"; sk.fillRect(0,0,s.width,s.height); return s; }
-function turnTo(n){ if(!st||n===st.spread||n<0||n>=SPREADS.length||st.flip) return; st.flip={from:st.spread,to:n,t:0,d:n>st.spread?1:-1}; st.spread=n; anim(); }
+function turnTo(n){ if(st?.mobile){goPage(n*2);return;} if(!st||n===st.spread||n<0||n>=SPREADS.length||st.flip) return; st.flip={from:st.spread,to:n,t:0,d:n>st.spread?1:-1}; st.spread=n; st.page=n*2; anim(); }
 function turn(d){ if(st) turnTo(st.spread+d); }
 let raf=0; function anim(){ cancelAnimationFrame(raf); const t0=performance.now(); const step=()=>{ if(!st||!st.flip){ render(); return; } st.flip.t=Math.min(1,(performance.now()-t0)/320); render(); if(st.flip.t<1) raf=requestAnimationFrame(step); else { st.flip=null; render(); } }; raf=requestAnimationFrame(step); setTimeout(()=>{ if(st&&st.flip){ st.flip=null; render(); } },400); }
 
@@ -757,9 +793,59 @@ function renderReceipt(){ hits=[]; const s=st; k.clearRect(0,0,W,H); const x0=17
   const by=y0+h-48; let bx=x0+w-28; const sub="投进邮筒", can=n>0; const sw=MB(sub)+16; bx-=sw; { const id="submit", hot=hover&&hover.id===id; chip(k,bx,by-(hot?1:0),sub,{on:can,onColor:RED,hot}); hits.push({id,x:bx,y:by,w:sw,h:22,act:()=>{ if(!can){ s.toast&&s.toast("至少给一条打个标记再投。"); return; } const cb=s.onSubmit, payload={total:tot,line:input.value.trim(),went:s.went,reasons:[...s.reasons]}; root.hidden=true; input.style.display="none"; st=null; cb&&cb(payload); }}); }
   const cw=MB("先不投")+16; bx-=cw+8; { const id="cancel", hot=hover&&hover.id===id; chip(k,bx,by-(hot?1:0),"先不投",{hot}); hits.push({id,x:bx,y:by,w:cw,h:22,act:close}); }
   placeInput(); }
-function placeInput(){ if(!st||st.mode!=="receipt"||!st.inputBox){ if(input) input.style.display="none"; return; } const [x,y,w,h]=st.inputBox; const r=cv.getBoundingClientRect(), pr=cv.parentElement.getBoundingClientRect(), s=r.width/W; input.style.display="block"; input.style.left=(r.left-pr.left+x*s)+"px"; input.style.top=(r.top-pr.top+y*s-2*s)+"px"; input.style.width=(w*s)+"px"; input.style.height=(h*s)+"px"; input.style.fontSize=Math.max(12,Math.round(13*s))+"px"; }
+function placeInput(){ if(!st||st.mobile||st.mode!=="receipt"||!st.inputBox){ if(input) input.style.display="none"; return; } const [x,y,w,h]=st.inputBox; const r=cv.getBoundingClientRect(), pr=cv.parentElement.getBoundingClientRect(), s=r.width/W; input.style.display="block"; input.style.left=(r.left-pr.left+x*s)+"px"; input.style.top=(r.top-pr.top+y*s-2*s)+"px"; input.style.width=(w*s)+"px"; input.style.height=(h*s)+"px"; input.style.fontSize=Math.max(12,Math.round(13*s))+"px"; }
 
-function render(){ if(!st) return; if(st.mode==="paper") renderPaper(); else renderReceipt(); }
+// Reflow the same page content at native CSS text size; no scaled text bitmap on phones.
+function el(tag,text,cls){const e=document.createElement(tag);if(text!=null)e.textContent=text;if(cls)e.className=cls;return e;}
+function action(label,fn,cls='chip'){const b=el('button',label,cls);b.type='button';b.onclick=()=>{fn();if(st)render();};return b;}
+function para(host,text,cls){host.append(el('p',text,cls));}
+function saveScroll(){if(!st)return;st.scrolls??={};st.scrolls[st.mode==='paper'?st.page:'receipt']=mobile.scrollTop;}
+function goPage(n){if(!st||st.mode!=='paper'||n<0||n>=st.pages.length||n===st.page)return;saveScroll();st.page=n;st.spread=Math.floor(n/2);render();}
+function turnPage(d){goPage((st?.page||0)+d);}
+function markButtons(host,it,receipt=false){const row=el('div',null,'row');
+  for(const [v,l] of [['yes','想去'],['meh','一般'],['no','不感兴趣']]){const b=action(l,()=>{saveScroll();st.marks[it.id]=!receipt&&st.marks[it.id]===v?undefined:v;st.onMark(it.id,st.marks[it.id]);},'chip '+v);b.setAttribute('aria-pressed',st.marks[it.id]===v);b.disabled=!!st.readOnly;row.append(b);}
+  if(receipt){const b=action('我去了',()=>{saveScroll();st.went=st.went===it.id?null:it.id;});b.setAttribute('aria-pressed',st.went===it.id);row.append(b);}host.append(row);
+}
+function renderMobile(){const s=st;saveScrollIfSame();mobile.replaceChildren();const page=el('article',null,'reader-page pix');mobile.append(page);
+  const closeRow=el('div',null,'row reader-close');closeRow.append(action('放下报纸',close));page.append(closeRow);
+  const section=(title)=>{page.append(el('h2',title));};
+  if(s.mode==='paper'){
+    const which=s.pages[s.page||0];page.dataset.page=String(s.page||0);
+    if(which==='front'){
+      para(page,s.archiveStamp||'');para(page,s.date+' · VOL. I · NO. 001 · '+s.wx);
+      page.append(el('h1','THE SUNDRY GAZETTE'));para(page,window.__CITY?.paperSubtitle||'太阳小报 · 北京朝阳好去处');
+      section('今日头条');const it=s.issue.items[0];page.append(el('h2',it.headline||it.title));para(page,it.hi);
+      page.append(action('→ 详见第 3 版',()=>goPage(2)));section('店主的话');
+      if(s.face){const face=mk(48,48);face.getContext('2d').drawImage(s.face,0,0,48,48);page.append(face);}para(page,s.issue.note);
+      section('分类广告');for(const [t,b] of [['寻物','去年借给 Merlin 的报纸一份。酬金：一杯热茶。'],['转让','铠甲一副，九成新。另有剑一把，不卖。']]){para(page,t);para(page,b,'note-b');}
+    }else if(which==='contents'){
+      section('本期目录');para(page,'CONTENTS');for(const [i,it] of s.issue.items.entries())page.append(action(`${i+3} · ${it.cat} · ${it.slot||''} ${it.title}`,()=>goPage(i+2),'back-row'));
+      para(page,'每一条都能直接报名、导航，');if(!s.readOnly)para(page,'读完记得往红邮筒里投回执。');
+    }else if(String(which).startsWith('back')){
+      const continuation=Number(String(which).slice(4))||0;
+      if(!continuation){section('读完了？');if(!s.readOnly){para(page,'把回执投进长椅旁边的红邮筒：');for(const [t,n] of [['每条打个标记','+2'],['五条全部标完','+2'],['跟老板说一句话','+1'],['去了其中一个','+15']])para(page,t+' '+n);page.append(action('现在就填回执',()=>{const cb=s.onReceipt;close();cb&&cb();},'pbtn'));} }
+      section('柜台留言本');if(s.answerPages[continuation]?.length)for(const l of s.answerPages[continuation])para(page,l.text);
+      else {const notes=(s.askLater||[]).filter(q=>!q.answer).slice(-3);if(notes.length)for(const q of notes)para(page,q.q+' 明天答复');else para(page,window.__STATIC_SITE?'想跟老板说的话，写在回执里发给 Arthur。':'在柜台问老板，他当场答不上来的问题会记在这里，下一期回答。');}
+      if(!continuation){section(window.__STATIC_SITE?'店主的话':'明日预告');para(page,window.__STATIC_SITE?'上海只给朋友出这一期。':'老板说要去找一家能看日落的屋顶咖啡。如果找到了，别告诉 Merlin。');para(page,`你的太阳币：${s.coins}`);}
+    }else{
+      const it=s.issue.items.find(it=>it.id===which);para(page,[it.slot,it.cat,it.free].filter(Boolean).join(' · '));page.append(el('h1',it.title));
+      const facts=el('dl',null,'facts');for(const [t,v] of [['时间',it.when],['地点',it.where],['路程',it.trip],['费用',it.price]])facts.append(el('dt',t),el('dd',v));page.append(facts);para(page,it.hi);
+      if(it.faq?.length){section('老板查好的');for(const [a,b] of it.faq)para(page,a+' · '+b);}para(page,'店主批注 · '+it.boss,'note-b');
+      const row=el('div',null,'row');for(const [a,l] of [['go',it.cat==='骑行'?'看路线':'去报名'],['nav','导航'],['copy','复制搜索词']])row.append(action(l,()=>s.onAction(a,it)));page.append(row);markButtons(page,it);if(it.verified)para(page,it.verified,'hint');
+    }
+    const nav=el('nav',null,'reader-nav');nav.setAttribute('aria-label','报纸翻页');const prev=action('上一页',()=>turnPage(-1)),next=action('下一页',()=>turnPage(1));prev.disabled=s.page===0;next.disabled=s.page===s.pages.length-1;nav.append(prev,el('span',`第 ${s.page+1} / ${s.pages.length} 页`),next);mobile.append(nav);
+  }else{
+    closeRow.firstChild.textContent='先不投';section('回执 · RECEIPT');para(page,'给这期每一条打个标记，30 秒就够。');
+    for(const it of s.issue.items){const item=el('section',null,'r-item');para(item,it.title);markButtons(item,it,true);
+      if(['meh','no'].includes(s.marks[it.id])){para(item,'原因');const row=el('div',null,'row');for(const reason of ['太远','太贵','时间不合适','不是我的菜','去过了']){const key=it.id+'|'+reason,b=action(reason,()=>{saveScroll();s.reasons.has(key)?s.reasons.delete(key):s.reasons.add(key);});b.setAttribute('aria-pressed',s.reasons.has(key));row.append(b);}item.append(row);}page.append(item);}
+    const label=el('label',s.went?'写一句评价（+1）：':'想跟老板说一句（选填，+1）：','fld'),field=el('input');field.maxLength=80;field.value=input.value;field.setAttribute('aria-label','想跟老板说一句');field.oninput=()=>{input.value=field.value;updateTotal();};label.append(field);page.append(label);
+    const total=el('p');page.append(total);const amount=()=>{const n=s.issue.items.filter(it=>s.marks[it.id]).length;return n*2+(n===s.issue.items.length?2:0)+(input.value.trim()?1:0)+(s.went?15:0);};function updateTotal(){total.textContent=`现在能挣 ${amount()} 币`; }updateTotal();
+    page.append(action('投进邮筒',()=>{if(!s.issue.items.some(it=>s.marks[it.id])){s.toast&&s.toast('至少给一条打个标记再投。');return;}const cb=s.onSubmit,payload={total:amount(),line:input.value.trim(),went:s.went,reasons:[...s.reasons]};root.hidden=true;st=null;cb&&cb(payload);},'pbtn'));
+  }
+  mobile.scrollTop=s.scrolls?.[s.mode==='paper'?s.page:'receipt']||0;mobile.dataset.renderedKey=s.mode+':'+(s.page||0);
+}
+function saveScrollIfSame(){if(mobile.dataset.renderedKey===st.mode+':'+(st.page||0))saveScroll();}
+function render(){ if(!st) return; if(st.mobile){renderMobile();return;}if(st.mode==="paper") renderPaper(); else renderReceipt(); }
 function openPaper(o){ ensure(); st={mode:"paper",spread:0,flip:null,pw:436,ph:494,sx:44,sy:6,...o};
   // Reuse the existing page vocabulary; overflow answers continue on another page without truncation.
   const answers=[...(o.issue.answers||[]),...(o.askLater||[]).filter(q=>q.answer).map(q=>({q:q.q,a:q.answer}))];
@@ -767,9 +853,9 @@ function openPaper(o){ ensure(); st={mode:"paper",spread:0,flip:null,pw:436,ph:4
   if(lines.length)for(const q of (o.askLater||[]).filter(q=>!q.answer).slice(-3)){lines.push(...wrap(q.q,372).map(text=>({text,color:INK})),{text:"明天答复",color:TEAL});}
   st.answerPages=[lines.splice(0,3)];while(lines.length)st.answerPages.push(lines.splice(0,18));
   const pages=['front','contents',...o.issue.items.map(i=>i.id),'back',...st.answerPages.slice(1).map((_,i)=>'back'+(i+1))];if(pages.length%2)pages.push(null);SPREADS=[];for(let i=0;i<pages.length;i+=2)SPREADS.push(pages.slice(i,i+2));
-  root.hidden=false; fit(); render(); setTimeout(render,60); }
-function openReceipt(o){ ensure(); st={mode:"receipt",went:null,reasons:new Set(),...o}; input.value=""; root.hidden=false; fit(); render(); input.style.display="block"; setTimeout(()=>{ placeInput(); },0); }
-window.PAPER={ openPaper, openReceipt, close, isOpen:()=>!!st, rerender:()=>render(), turnTo:n=>turnTo(n) };
+  st.pages=pages.filter(p=>p!==null);st.page=0;mobile.dataset.renderedKey='';root.hidden=false; fit(); render(); setTimeout(render,60); }
+function openReceipt(o){ ensure(); st={mode:"receipt",went:null,reasons:new Set(),...o}; input.value="";mobile.dataset.renderedKey='';root.hidden=false; fit(); render(); setTimeout(()=>{ placeInput(); },0); }
+window.PAPER={ openPaper, openReceipt, close, isOpen:()=>!!st, rerender:()=>render(), turnTo:n=>turnTo(n), turnPage, position:()=>st?{single:!!st.mobile,page:st.page,spread:st.spread}:null };
 })();
 
 </script>
@@ -966,10 +1052,10 @@ window.DIALOG={ load, open, close, say, draw, isOpen:()=>!!st, face, EXPRS };
   'use strict';
   const dates=x=>[...new Set(Array.isArray(x)?x:x?.dates||[])].filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse();
   async function json(url){const r=await fetch(url);if(!r.ok)throw Error(`${url}: ${r.status}`);return r.json();}
-  let published=[];
+  let published=[],currentDate=null;
   const getIssue=date=>json(`issues/${date}.json`).then(i=>{if(i.date!==date||!Array.isArray(i.items)||!i.items.length)throw Error('Invalid issue');return i;});
-  async function load(today){published=dates(await json('issues/index.json'));const date=published.find(d=>d<=today);return date?getIssue(date):null;}
-  async function back(today){const wanted=DailyDB.backIssueDates(today).filter(d=>published.includes(d));return Promise.all(wanted.map(getIssue));}
+  async function load(today){published=dates(await json('issues/index.json'));currentDate=published.find(d=>d<=today)||null;return currentDate?getIssue(currentDate):null;}
+  async function back(today){const wanted=DailyDB.backIssueDates(today).filter(d=>published.includes(d)&&d!==currentDate);return Promise.all(wanted.map(getIssue));}
   function receiptText(issue,r){const labels={yes:'想去',go:'想去',meh:'一般',no:'不感兴趣'};
     const summary=issue.items.map(i=>`${labels[r.marks[i.id]]||'未标记'}：${i.title}`).join('\n');
     return `${issue.date} 上海太阳小报回执\n${summary}\n一句话：${r.line||'（未填写）'}\n#回执 ${JSON.stringify({date:issue.date,marks:r.marks,line:r.line||'',reasons:r.reasons||[],errors:r.errors||[]})}`;
@@ -1231,7 +1317,7 @@ const LN={
   backBought:["五个币，拿好。有些活动可能已经结束了，看个念想。"],
   backNoCredit:["过刊不赊账，这是规矩。去邮筒或电话亭挣点再来。"],
   backTitle:"过刊箱 · 最近七天",backUnavailable:"箱子打不开，过会儿再试",
-  backEmpty:"箱子还是空的。明天起，看过的报纸都会放进来。",
+  backEmpty:STATIC_SITE?"上海只出这一期，过刊箱里是空的。":"箱子还是空的。明天起，看过的报纸都会放进来。",
   backRead:"已读",backPrice:"过刊 5 币",backReceipt:"回执✓",backStopped:"停刊",
   // TODO(design): Gawain 验收这两句待报台词；数据库空库时沿用这一提示。
   pending:["送报的三轮还没到。先翻翻昨天那份垫垫？","今天的报纸还在路上。Merlin 那老头又在路上跟人下棋了吧。"],
@@ -1480,7 +1566,7 @@ async function openBackIssues(){
     }
   }catch{if(request===backRequest)$("#backList").replaceChildren(h("p",{class:"hint",text:LN.backUnavailable}));}
 }
-function closePaper(){ if(D.receiptDate!==D.boughtDate) sayGW("看完了？红邮筒就在长椅旁边，回执投进去，明天的报纸钱就有了。","grin"); }
+function closePaper(){ if(D.receiptDate!==D.boughtDate) sayGW(STATIC_SITE?"读完记得往红邮筒里投回执。":"看完了？红邮筒就在长椅旁边，回执投进去，明天的报纸钱就有了。","grin"); }
 function paperAction(kind,it){ if(kind==="copy"){ const ok=()=>toast(`已复制搜索词：${it.q}`), no=()=>toast(`复制没成功，搜索词是：${it.q}`); try{ navigator.clipboard.writeText(it.q).then(ok,no); }catch{ no(); } }
   else { const url=it.links?.[kind==="nav"?"map":"buy"]; if(url&&/^https?:\/\//i.test(url))window.open(url,"_blank","noopener,noreferrer"); else toast(`示例刊：正式版这里会直接打开${kind==="nav"?"导航":it.cat==="骑行"?"地图路线":"报名页"}。`); } }
 async function openMail(){ let receiptIssue=issue();const date=D.boughtIssueDate||D.boughtDate||issueDate();
