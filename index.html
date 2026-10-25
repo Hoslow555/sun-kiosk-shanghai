@@ -1054,7 +1054,7 @@ window.DIALOG={ load, open, close, say, draw, isOpen:()=>!!st, face, EXPRS };
   async function json(url){const r=await fetch(url);if(!r.ok)throw Error(`${url}: ${r.status}`);return r.json();}
   let published=[],currentDate=null;
   const getIssue=date=>json(`issues/${date}.json`).then(i=>{if(i.date!==date||!Array.isArray(i.items)||!i.items.length)throw Error('Invalid issue');return i;});
-  async function load(today){published=dates(await json('issues/index.json'));currentDate=published.find(d=>d<=today)||null;return currentDate?getIssue(currentDate):null;}
+  async function load(today){published=dates(await json('issues/index.json'));currentDate=published.find(d=>d<=today)||published.at(-1)||null;return currentDate?getIssue(currentDate):null;}
   async function back(today){const wanted=DailyDB.backIssueDates(today).filter(d=>published.includes(d)&&d!==currentDate);return Promise.all(wanted.map(getIssue));}
   function receiptText(issue,r){const labels={yes:'想去',go:'想去',meh:'一般',no:'不感兴趣'};
     const summary=issue.items.map(i=>`${labels[r.marks[i.id]]||'未标记'}：${i.title}`).join('\n');
